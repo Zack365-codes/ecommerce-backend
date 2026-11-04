@@ -158,16 +158,23 @@ if ($result) {
                     <?= !empty($cat['created_at']) ? date('M d, Y h:i A', strtotime($cat['created_at'])) : '—' ?>
                   </td>
                   <td>
-                    <span class="badge bg-light text-dark border"><?= (int)($cat['product_count'] ?? 0) ?> Models</span>
+                    <a href="products.php?category=<?= (int)$cat['id'] ?>" class="badge bg-light text-dark border text-decoration-none" title="Filter products by this category">
+                      <?= (int)($cat['product_count'] ?? 0) ?> Models <i class="bi bi-arrow-up-right small"></i>
+                    </a>
                   </td>
                   <td><span class="badge-status badge-status-success">Active</span></td>
                   <td>
-                    <form action="actions/handle_delete_category.php" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete category \'<?= htmlspecialchars(addslashes($cat['name'])) ?>\'?');">
-                      <input type="hidden" name="id" value="<?= (int)$cat['id'] ?>">
-                      <button type="submit" class="btn btn-sm btn-outline-danger py-1 px-2" title="Delete Category">
-                        <i class="bi bi-trash"></i>
+                    <div class="d-flex gap-1">
+                      <button type="button" class="btn btn-sm btn-outline-dark py-1 px-2 btn-edit-category" data-id="<?= (int)$cat['id'] ?>" data-name="<?= htmlspecialchars($cat['name']) ?>" data-bs-toggle="modal" data-bs-target="#editCatModal" title="Edit Category">
+                        <i class="bi bi-pencil"></i>
                       </button>
-                    </form>
+                      <form action="actions/handle_delete_category.php" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete category \'<?= htmlspecialchars(addslashes($cat['name'])) ?>\'?');">
+                        <input type="hidden" name="id" value="<?= (int)$cat['id'] ?>">
+                        <button type="submit" class="btn btn-sm btn-outline-danger py-1 px-2" title="Delete Category">
+                          <i class="bi bi-trash"></i>
+                        </button>
+                      </form>
+                    </div>
                   </td>
                 </tr>
               <?php endforeach; ?>
@@ -213,6 +220,34 @@ if ($result) {
         </div>
       </div>
     </div>
+
+    <!-- Edit Category Modal -->
+    <div class="modal fade" id="editCatModal" tabindex="-1" aria-labelledby="editCatModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <form action="actions/handle_edit_category.php" method="POST">
+            <input type="hidden" name="id" id="editCatId" value="">
+            <div class="modal-header">
+              <h5 class="modal-title fs-6 fw-bold" id="editCatModalLabel">Edit Category</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label for="editCatName" class="form-label small fw-bold">Category Name <span class="text-danger">*</span></label>
+                <input type="text" name="name" id="editCatName" class="form-control" placeholder="e.g. Formal Shoes" required maxlength="100" autocomplete="off">
+                <div class="form-text small text-muted">Duplicate category names are automatically prevented.</div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-sm btn-dark">
+                <i class="bi bi-check-lg me-1"></i> Update Category
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
   
       </main>
     </div>
@@ -237,5 +272,15 @@ if ($result) {
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="assets/js/dashboard.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.btn-edit-category').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          document.getElementById('editCatId').value = this.getAttribute('data-id');
+          document.getElementById('editCatName').value = this.getAttribute('data-name');
+        });
+      });
+    });
+  </script>
 </body>
 </html>

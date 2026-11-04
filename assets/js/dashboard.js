@@ -96,18 +96,6 @@ function initDemoModalsAndAlerts() {
     });
   }
 
-  // Stock adjust confirm
-  const confirmStockBtn = document.getElementById('btnConfirmStockAdjust');
-  if (confirmStockBtn) {
-    confirmStockBtn.addEventListener('click', () => {
-      alert('Stock adjustment recorded successfully in demo audit log!');
-      const modalEl = document.getElementById('stockAdjustModal');
-      if (modalEl && typeof bootstrap !== 'undefined') {
-        const modal = bootstrap.Modal.getInstance(modalEl);
-        if (modal) modal.hide();
-      }
-    });
-  }
 
   // Generic forms
   document.querySelectorAll('.admin-demo-form').forEach(form => {
@@ -121,15 +109,21 @@ function initDemoModalsAndAlerts() {
 
 /* 5. Simple Search Filter for Tables */
 function initSearchFilters() {
-  const searchInput = document.getElementById('tableSearchInput');
-  if (searchInput) {
-    searchInput.addEventListener('input', function() {
+  const searchInputs = [
+    document.getElementById('tableSearchInput'),
+    document.getElementById('productFilterInput')
+  ].filter(Boolean);
+
+  searchInputs.forEach(input => {
+    input.addEventListener('input', function() {
       const query = this.value.toLowerCase().trim();
       const rows = document.querySelectorAll('.filterable-table-body tr');
       rows.forEach(row => {
+        // Skip empty-state rows
+        if (row.querySelector('td[colspan]')) return;
         const text = row.textContent.toLowerCase();
         row.style.display = text.includes(query) ? '' : 'none';
       });
     });
-  }
+  });
 }

@@ -1,6 +1,63 @@
 <?php 
 require_once __DIR__ . '/settings/session.php';
 require_once __DIR__ . '/settings/auth.php';
+require_once __DIR__ . '/settings/db.php';
+
+$errors  = $_SESSION['errors']  ?? [];
+$success = $_SESSION['success'] ?? '';
+unset($_SESSION['errors'], $_SESSION['success']);
+
+$id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+if ($id <= 0) {
+    $_SESSION['errors'] = ["Invalid product selected for editing."];
+    header("Location: products.php");
+    exit;
+}
+
+// Fetch product details
+$stmt = mysqli_prepare($conn, "SELECT * FROM products WHERE id = ?");
+mysqli_stmt_bind_param($stmt, 'i', $id);
+mysqli_stmt_execute($stmt);
+$res = mysqli_stmt_get_result($stmt);
+$product = mysqli_fetch_assoc($res);
+mysqli_stmt_close($stmt);
+
+if (!$product) {
+    $_SESSION['errors'] = ["Product with ID #$id was not found in the catalog."];
+    header("Location: products.php");
+    exit;
+}
+
+// Fetch categories dynamically
+$categories = [];
+$catResult = @mysqli_query($conn, "SELECT id, name FROM categories ORDER BY name ASC");
+if ($catResult) {
+    while ($row = mysqli_fetch_assoc($catResult)) {
+        $categories[] = $row;
+    }
+}
+
+// Fetch brands dynamically
+$brands = [];
+$brandResult = @mysqli_query($conn, "SELECT id, name FROM brands ORDER BY name ASC");
+if ($brandResult) {
+    while ($row = mysqli_fetch_assoc($brandResult)) {
+        $brands[] = $row;
+    }
+}
+
+// Fetch existing variants mapped by size_eu
+$variants = [];
+$varStmt = @mysqli_prepare($conn, "SELECT * FROM product_variants WHERE product_id = ?");
+if ($varStmt) {
+    mysqli_stmt_bind_param($varStmt, 'i', $id);
+    mysqli_stmt_execute($varStmt);
+    $varRes = mysqli_stmt_get_result($varStmt);
+    while ($vRow = mysqli_fetch_assoc($varRes)) {
+        $variants[(int)$vRow['size_eu']] = $vRow;
+    }
+    mysqli_stmt_close($varStmt);
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -76,171 +133,228 @@ require_once __DIR__ . '/settings/auth.php';
         
     <div class="d-flex justify-content-between align-items-center mb-4">
       <div>
-        <h1 class="page-title">Edit Footwear: Regal Wholecut Oxford</h1>
-        <p class="page-subtitle">Product ID: NF-1001 &bull; SKU: NF-OXF-01 &bull; Created 12 Aug 2026</p>
+        <h1 class="page-title">Edit Footwear: <?= htmlspecialchars($product['name']) ?></h1>
+        <p class="page-subtitle">Product ID: #<?= (int)$product['id'] ?> &bull; SKU: <?= htmlspecialchars($product['sku']) ?> &bull; Created <?= !empty($product['created_at']) ? date('d M Y', strtotime($product['created_at'])) : '—' ?></p>
       </div>
       <div class="d-flex gap-2">
-        <a href="../front-site/product-details.html" target="_blank" class="btn btn-sm btn-outline-secondary">
-          <i class="bi bi-eye me-1"></i> View Live
-        </a>
         <a href="products.php" class="btn btn-sm btn-dark">
-          Back to List
+          <i class="bi bi-arrow-left me-1"></i> Back to Catalog
         </a>
       </div>
     </div>
 
-    <form class="admin-demo-form" data-success-msg="Changes to 'Regal Wholecut Oxford' updated successfully!">
+    <?php if (!empty($errors)): ?>
+      <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+        <ul class="mb-0">
+          <?php foreach ($errors as $error): ?>
+            <li><?= htmlspecialchars($error) ?></li>
+          <?php endforeach; ?>
+        </ul>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    <?php endif; ?>
+
+    <?php if (!empty($success)): ?>
+      <div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+        <i class="bi bi-check-circle me-2"></i><?= htmlspecialchars($success) ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    <?php endif; ?>
+
+    <form action="actions/handle_edit_product.php" method="POST" enctype="multipart/form-data">
+      <input type="hidden" name="id" value="<?= (int)$product['id'] ?>">
+
       <div class="row g-4">
         
         <div class="col-lg-8">
+          <!-- Footwear Details -->
           <div class="admin-card mb-4">
-            <div class="admin-card-header"><h5 class="admin-card-title">Footwear Details</h5></div>
+            <div class="admin-card-header"><h5 class="admin-card-title">1. Footwear Details</h5></div>
             <div class="admin-card-body">
               <div class="row g-3">
                 <div class="col-md-8">
-                  <label class="form-label small fw-bold">Product Name</label>
-                  <input type="text" class="form-control" value="Regal Wholecut Oxford" required>
+                  <label class="form-label small fw-bold">Product Name <span class="text-danger">*</span></label>
+                  <input type="text" name="name" class="form-control" value="<?= htmlspecialchars($product['name']) ?>" required>
                 </div>
                 <div class="col-md-4">
-                  <label class="form-label small fw-bold">SKU Code</label>
-                  <input type="text" class="form-control" value="NF-OXF-01" required>
+                  <label class="form-label small fw-bold">SKU Code <span class="text-danger">*</span></label>
+                  <input type="text" name="sku" class="form-control" value="<?= htmlspecialchars($product['sku']) ?>" required>
                 </div>
                 <div class="col-md-6">
-                  <label class="form-label small fw-bold">Category</label>
-                  <select class="form-select">
-                    <option selected>Formal Shoes</option>
+                  <label class="form-label small fw-bold">Category <span class="text-danger">*</span></label>
+                  <select name="category_id" class="form-select" required>
+                    <option value="">-- Choose Category --</option>
+                    <?php foreach ($categories as $cat): ?>
+                      <option value="<?= (int)$cat['id'] ?>" <?= ($product['category_id'] == $cat['id']) ? 'selected' : '' ?>>
+                        <?= htmlspecialchars($cat['name']) ?>
+                      </option>
+                    <?php endforeach; ?>
                   </select>
                 </div>
                 <div class="col-md-6">
-                  <label class="form-label small fw-bold">Brand</label>
-                  <input type="text" class="form-control" value="SHOES LAB Black Label">
+                  <label class="form-label small fw-bold">Atelier Brand <span class="text-danger">*</span></label>
+                  <select name="brand_id" class="form-select" required>
+                    <option value="">-- Choose Atelier Brand --</option>
+                    <?php foreach ($brands as $brand): ?>
+                      <option value="<?= (int)$brand['id'] ?>" <?= ($product['brand_id'] == $brand['id']) ? 'selected' : '' ?>>
+                        <?= htmlspecialchars($brand['name']) ?>
+                      </option>
+                    <?php endforeach; ?>
+                  </select>
                 </div>
                 <div class="col-12">
-                  <label class="form-label small fw-bold">Short Description</label>
-                  <textarea class="form-control" rows="2">Cut from a single flawless piece of premium calfskin, offering an unbroken silhouette for the discerning gentleman.</textarea>
+                  <label class="form-label small fw-bold">Short Silhouette Description</label>
+                  <textarea name="short_description" class="form-control" rows="2"><?= htmlspecialchars($product['short_description'] ?? '') ?></textarea>
+                </div>
+                <div class="col-12">
+                  <label class="form-label small fw-bold">Full Craftsmanship Description</label>
+                  <textarea name="description" class="form-control" rows="4"><?= htmlspecialchars($product['description'] ?? '') ?></textarea>
                 </div>
               </div>
             </div>
           </div>
 
+          <!-- Pricing in PKR -->
           <div class="admin-card mb-4">
-            <div class="admin-card-header"><h5 class="admin-card-title">Pricing (PKR)</h5></div>
+            <div class="admin-card-header"><h5 class="admin-card-title">2. Pricing in Pakistani Rupee (PKR)</h5></div>
             <div class="admin-card-body">
               <div class="row g-3">
-                <div class="col-md-6">
-                  <label class="form-label small fw-bold">Selling Price (PKR)</label>
-                  <input type="number" class="form-control" value="14999" required>
+                <div class="col-md-4">
+                  <label class="form-label small fw-bold">Selling Price (PKR) <span class="text-danger">*</span></label>
+                  <input type="number" step="0.01" name="price_pkr" class="form-control" value="<?= htmlspecialchars($product['price_pkr']) ?>" required min="0">
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-4">
                   <label class="form-label small fw-bold">Original Price (PKR)</label>
-                  <input type="number" class="form-control" value="17500">
+                  <input type="number" step="0.01" name="original_price_pkr" class="form-control" value="<?= htmlspecialchars($product['original_price_pkr'] ?? '') ?>" min="0">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small fw-bold">Cost of Goods (Internal PKR)</label>
+                  <input type="number" step="0.01" name="cost_price_pkr" class="form-control" value="<?= htmlspecialchars($product['cost_price_pkr'] ?? '') ?>" min="0">
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Variants -->
+          <!-- Size EU 39–46 Variants -->
           <div class="admin-card mb-4">
-            <div class="admin-card-header"><h5 class="admin-card-title">Size Variants & Stock</h5></div>
+            <div class="admin-card-header d-flex justify-content-between align-items-center">
+              <h5 class="admin-card-title">3. Size EU 39–46 Variant Inventory</h5>
+              <span class="text-muted small">Total: <?= (int)$product['stock_quantity'] ?> pairs</span>
+            </div>
             <div class="admin-card-body p-0">
               <table class="table variant-table table-bordered mb-0 small">
                 <thead class="table-light">
                   <tr>
-                    <th>Size</th>
-                    <th>Color</th>
-                    <th>Stock</th>
+                    <th>Shoe Size</th>
+                    <th>Colorway</th>
+                    <th>Stock Qty</th>
                     <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  
+                  <?php
+                  $sizes = [39, 40, 41, 42, 43, 44, 45, 46];
+                  foreach ($sizes as $sz):
+                    $vStock = isset($variants[$sz]) ? (int)$variants[$sz]['stock_quantity'] : 4;
+                    $vColor = isset($variants[$sz]) ? $variants[$sz]['color_name'] : 'Nero Black';
+                    $vStatus = $vStock > 5 ? 'In Stock' : ($vStock > 0 ? 'Low Stock' : 'Out of Stock');
+                    $badgeClass = $vStock > 5 ? 'bg-success' : ($vStock > 0 ? 'bg-warning text-dark' : 'bg-danger');
+                  ?>
                     <tr>
-                      <td><strong>EU 39</strong></td>
-                      <td>Nero Black</td>
-                      <td><input type="number" class="form-control form-control-sm" value="4" style="width: 80px;"></td>
-                      <td><span class="badge bg-success">In Stock</span></td>
+                      <td>
+                        <strong>EU <?= $sz ?></strong>
+                        <input type="hidden" name="variants[<?= $sz ?>][size]" value="<?= $sz ?>">
+                      </td>
+                      <td>
+                        <input type="text" name="variants[<?= $sz ?>][color]" class="form-control form-control-sm" value="<?= htmlspecialchars($vColor) ?>">
+                      </td>
+                      <td>
+                        <input type="number" name="variants[<?= $sz ?>][stock]" class="form-control form-control-sm" value="<?= $vStock ?>" min="0" style="width: 80px;">
+                      </td>
+                      <td><span class="badge <?= $badgeClass ?>"><?= $vStatus ?></span></td>
                     </tr>
-                  
-                    <tr>
-                      <td><strong>EU 40</strong></td>
-                      <td>Nero Black</td>
-                      <td><input type="number" class="form-control form-control-sm" value="4" style="width: 80px;"></td>
-                      <td><span class="badge bg-success">In Stock</span></td>
-                    </tr>
-                  
-                    <tr>
-                      <td><strong>EU 41</strong></td>
-                      <td>Nero Black</td>
-                      <td><input type="number" class="form-control form-control-sm" value="4" style="width: 80px;"></td>
-                      <td><span class="badge bg-success">In Stock</span></td>
-                    </tr>
-                  
-                    <tr>
-                      <td><strong>EU 42</strong></td>
-                      <td>Nero Black</td>
-                      <td><input type="number" class="form-control form-control-sm" value="4" style="width: 80px;"></td>
-                      <td><span class="badge bg-success">In Stock</span></td>
-                    </tr>
-                  
-                    <tr>
-                      <td><strong>EU 43</strong></td>
-                      <td>Nero Black</td>
-                      <td><input type="number" class="form-control form-control-sm" value="4" style="width: 80px;"></td>
-                      <td><span class="badge bg-success">In Stock</span></td>
-                    </tr>
-                  
-                    <tr>
-                      <td><strong>EU 44</strong></td>
-                      <td>Nero Black</td>
-                      <td><input type="number" class="form-control form-control-sm" value="4" style="width: 80px;"></td>
-                      <td><span class="badge bg-success">In Stock</span></td>
-                    </tr>
-                  
-                    <tr>
-                      <td><strong>EU 45</strong></td>
-                      <td>Nero Black</td>
-                      <td><input type="number" class="form-control form-control-sm" value="4" style="width: 80px;"></td>
-                      <td><span class="badge bg-success">In Stock</span></td>
-                    </tr>
-                  
-                    <tr>
-                      <td><strong>EU 46</strong></td>
-                      <td>Nero Black</td>
-                      <td><input type="number" class="form-control form-control-sm" value="4" style="width: 80px;"></td>
-                      <td><span class="badge bg-success">In Stock</span></td>
-                    </tr>
-                  
+                  <?php endforeach; ?>
                 </tbody>
               </table>
             </div>
           </div>
         </div>
 
+        <!-- Right Column: Images, Specs & Status -->
         <div class="col-lg-4">
+          
+          <!-- Image Box -->
           <div class="admin-card mb-4">
-            <div class="admin-card-header"><h5 class="admin-card-title">Images</h5></div>
+            <div class="admin-card-header"><h5 class="admin-card-title">Product Imagery</h5></div>
             <div class="admin-card-body text-center">
-              <img src="https://images.unsplash.com/photo-1614252235316-8c857d38b5f4?q=80&w=800&auto=format&fit=crop" class="img-thumbnail mb-3" style="width: 140px; height: 140px; object-fit: cover;" alt="Regal Wholecut Oxford">
-              <div><button type="button" class="btn btn-sm btn-outline-secondary">Replace Image</button></div>
+              <?php 
+                $currentImg = htmlspecialchars($product['image_url'] ?? '');
+                if (!$currentImg) {
+                    $currentImg = 'https://images.unsplash.com/photo-1614252235316-8c857d38b5f4?q=80&w=200&auto=format&fit=crop';
+                }
+              ?>
+              <div id="imagePreviewContainer" class="mb-3">
+                <img src="<?= $currentImg ?>" class="img-thumbnail" style="width: 140px; height: 140px; object-fit: cover;" alt="<?= htmlspecialchars($product['name']) ?>">
+              </div>
+              
+              <div class="img-upload-box mb-2 p-2" onclick="document.getElementById('fileInputEdit').click();" style="cursor: pointer; border: 1px dashed #ccc; border-radius: 6px;">
+                <i class="bi bi-cloud-arrow-up fs-4 text-muted d-block"></i>
+                <span class="small fw-semibold">Click to replace photo</span>
+                <div class="text-muted" style="font-size: 0.7rem;">PNG, JPG, or WEBP up to 5MB</div>
+                <input type="file" name="image" id="fileInputEdit" class="d-none product-image-input" data-preview-target="imagePreviewContainer" accept="image/png, image/jpeg, image/webp">
+              </div>
+              <div class="text-muted" style="font-size: 0.72rem;">Leave empty to keep the existing image.</div>
             </div>
           </div>
 
+          <!-- Product Specifications -->
           <div class="admin-card mb-4">
-            <div class="admin-card-header"><h5 class="admin-card-title">Status</h5></div>
+            <div class="admin-card-header"><h5 class="admin-card-title">Footwear Attributes</h5></div>
             <div class="admin-card-body">
-              <select class="form-select form-select-sm mb-3">
-                <option selected>Active</option>
-                <option>Draft</option>
-                <option>Archived</option>
-              </select>
-              <div class="form-check mb-2">
-                <input class="form-check-input" type="checkbox" id="editFeat" checked>
-                <label class="form-check-label small" for="editFeat">Featured in Storefront</label>
+              <div class="mb-3">
+                <label class="form-label small fw-bold">Upper Material</label>
+                <input type="text" name="material" class="form-control form-control-sm" value="<?= htmlspecialchars($product['material'] ?? '') ?>">
+              </div>
+              <div class="mb-3">
+                <label class="form-label small fw-bold">Sole Construction</label>
+                <input type="text" name="sole_type" class="form-control form-control-sm" value="<?= htmlspecialchars($product['sole_type'] ?? '') ?>">
+              </div>
+              <div class="mb-3">
+                <label class="form-label small fw-bold">Occasion</label>
+                <input type="text" name="occasion" class="form-control form-control-sm" value="<?= htmlspecialchars($product['occasion'] ?? '') ?>">
               </div>
             </div>
           </div>
 
-          <button type="submit" class="btn btn-dark w-100 py-2 mb-2">Update Product</button>
+          <!-- Status & Badges -->
+          <div class="admin-card mb-4">
+            <div class="admin-card-header"><h5 class="admin-card-title">Publishing Flags</h5></div>
+            <div class="admin-card-body">
+              <div class="mb-3">
+                <label class="form-label small fw-bold">Status</label>
+                <select name="status" class="form-select form-select-sm">
+                  <option value="Active" <?= ($product['status'] === 'Active') ? 'selected' : '' ?>>Active (Visible in Store)</option>
+                  <option value="Draft" <?= ($product['status'] === 'Draft') ? 'selected' : '' ?>>Draft</option>
+                  <option value="Archived" <?= ($product['status'] === 'Archived') ? 'selected' : '' ?>>Archived</option>
+                  <option value="Out of Stock" <?= ($product['status'] === 'Out of Stock') ? 'selected' : '' ?>>Out of Stock</option>
+                </select>
+              </div>
+
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" name="is_new" value="1" id="flagNewArrival" <?= !empty($product['is_new']) ? 'checked' : '' ?>>
+                <label class="form-check-label small" for="flagNewArrival">New Arrival Tag</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="is_sale" value="1" id="flagOnSale" <?= !empty($product['is_sale']) ? 'checked' : '' ?>>
+                <label class="form-check-label small" for="flagOnSale">Show On Sale</label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Buttons -->
+          <button type="submit" class="btn btn-dark w-100 py-2 mb-2">
+            <i class="bi bi-check-lg me-1"></i> Update Footwear Model
+          </button>
           <a href="products.php" class="btn btn-outline-secondary w-100">Cancel</a>
         </div>
 

@@ -1,6 +1,77 @@
 <?php 
 require_once __DIR__ . '/settings/session.php';
 require_once __DIR__ . '/settings/auth.php';
+require_once __DIR__ . '/settings/db.php';
+
+$errors  = $_SESSION['errors']  ?? [];
+$success = $_SESSION['success'] ?? '';
+unset($_SESSION['errors'], $_SESSION['success']);
+
+// 1. Simple Summary Queries (Aasan step-by-step tareeqa)
+
+// 1. Total models count
+$res1 = mysqli_query($conn, "SELECT COUNT(*) AS total FROM products");
+$row1 = mysqli_fetch_assoc($res1);
+$total_models = $row1 ? (int)$row1['total'] : 0;
+
+// 2. Total units (pairs)
+$res2 = mysqli_query($conn, "SELECT SUM(stock_quantity) AS total FROM products");
+$row2 = mysqli_fetch_assoc($res2);
+$total_units = $row2 ? (int)$row2['total'] : 0;
+
+// 3. Low stock models count
+$res3 = mysqli_query($conn, "SELECT COUNT(*) AS total FROM products WHERE stock_quantity > 0 AND stock_quantity <= low_stock_threshold");
+$row3 = mysqli_fetch_assoc($res3);
+$low_stock_count = $row3 ? (int)$row3['total'] : 0;
+
+// 4. Out of stock models count
+$res4 = mysqli_query($conn, "SELECT COUNT(*) AS total FROM products WHERE stock_quantity = 0");
+$row4 = mysqli_fetch_assoc($res4);
+$out_of_stock_count = $row4 ? (int)$row4['total'] : 0;
+
+$stats = [
+    'total_models'       => $total_models,
+    'total_units'        => $total_units,
+    'low_stock_count'    => $low_stock_count,
+    'out_of_stock_count' => $out_of_stock_count
+];
+
+// 2. Filter parameter (all, in, low, out)
+$stockFilter = trim($_GET['filter'] ?? '');
+
+// 3. Fetch Products with Category and Brand names
+$invQuery = "SELECT p.id, p.name, p.sku, p.stock_quantity, p.low_stock_threshold, p.status, p.image_url, 
+                    c.name AS category_name, b.name AS brand_name
+             FROM products p
+             LEFT JOIN categories c ON c.id = p.category_id
+             LEFT JOIN brands b ON b.id = p.brand_id";
+
+if ($stockFilter === 'low') {
+    $invQuery .= " WHERE p.stock_quantity > 0 AND p.stock_quantity <= p.low_stock_threshold";
+} elseif ($stockFilter === 'out') {
+    $invQuery .= " WHERE p.stock_quantity = 0";
+} elseif ($stockFilter === 'in') {
+    $invQuery .= " WHERE p.stock_quantity > p.low_stock_threshold";
+}
+
+$invQuery .= " ORDER BY p.stock_quantity ASC, p.id DESC";
+
+$inventory = [];
+$res = @mysqli_query($conn, $invQuery);
+if ($res) {
+    while ($row = mysqli_fetch_assoc($res)) {
+        $inventory[] = $row;
+    }
+}
+
+// 4. Fetch all products for the Adjustment Modal dropdown
+$allProducts = [];
+$allProdRes = @mysqli_query($conn, "SELECT id, name, sku, stock_quantity FROM products ORDER BY name ASC");
+if ($allProdRes) {
+    while ($row = mysqli_fetch_assoc($allProdRes)) {
+        $allProducts[] = $row;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -19,733 +90,328 @@ require_once __DIR__ . '/settings/auth.php';
     
     <?php require_once __DIR__ . "/partials/sidebar.php" ?>
     
-<div class="admin-main">
+    <div class="admin-main">
       
-    <!-- Topbar -->
-    <header class="admin-topbar">
-      <div class="d-flex align-items-center gap-3">
-        <button class="btn btn-link text-dark p-0 d-lg-none" id="sidebarToggleBtn" aria-label="Toggle Navigation">
-          <i class="bi bi-list fs-3"></i>
-        </button>
-        <div class="topbar-search">
-          <i class="bi bi-search search-icon"></i>
-          <input type="text" class="form-control" id="tableSearchInput" placeholder="Quick search inventory, orders...">
-        </div>
-      </div>
-
-      <div class="topbar-actions">
-        <a href="../front-site/index.html" target="_blank" class="btn btn-sm btn-outline-secondary d-none d-md-inline-flex align-items-center gap-1">
-          <i class="bi bi-eye"></i> View Site
-        </a>
-        
-        <div class="dropdown">
-          <a href="#" class="topbar-icon-btn" data-bs-toggle="dropdown" aria-expanded="false" title="Notifications">
-            <i class="bi bi-bell"></i>
-            <span class="topbar-badge-dot"></span>
-          </a>
-          <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0" style="min-width: 280px;">
-            <li><h6 class="dropdown-header text-uppercase small fw-bold">Recent Alerts</h6></li>
-            <li><a class="dropdown-item small py-2" href="orders.php"><i class="bi bi-bag-check text-success me-2"></i> New Order #NF-88291 received (PKR 14,999)</a></li>
-            <li><a class="dropdown-item small py-2" href="inventory.php"><i class="bi bi-exclamation-triangle text-warning me-2"></i> Low stock: Sahara Suede Chukka (9 left)</a></li>
-            <li><a class="dropdown-item small py-2" href="reviews.php"><i class="bi bi-star text-primary me-2"></i> New 5-star review pending approval</a></li>
-            <li><hr class="dropdown-divider"></li>
-            <li><a class="dropdown-item text-center small text-primary fw-semibold" href="orders.php">View All Notifications</a></li>
-          </ul>
+      <!-- Topbar -->
+      <header class="admin-topbar">
+        <div class="d-flex align-items-center gap-3">
+          <button class="btn btn-link text-dark p-0 d-lg-none" id="sidebarToggleBtn" aria-label="Toggle Navigation">
+            <i class="bi bi-list fs-3"></i>
+          </button>
+          <div class="topbar-search">
+            <i class="bi bi-search search-icon"></i>
+            <input type="text" class="form-control" id="tableSearchInput" placeholder="Quick search inventory...">
+          </div>
         </div>
 
-        <div class="dropdown">
-          <a href="#" class="d-flex align-items-center text-decoration-none dropdown-toggle text-dark" data-bs-toggle="dropdown" aria-expanded="false">
-            <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop" class="admin-avatar me-2" alt="Admin">
-            <div class="d-none d-sm-block text-start">
-              <div class="fw-semibold small leading-none">M. Asif</div>
-              <div class="text-muted" style="font-size: 0.7rem;">Store Director</div>
-            </div>
+        <div class="topbar-actions">
+          <a href="../front-site/index.html" target="_blank" class="btn btn-sm btn-outline-secondary d-none d-md-inline-flex align-items-center gap-1">
+            <i class="bi bi-eye"></i> View Site
           </a>
-          <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
-            <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2 text-muted"></i> My Profile</a></li>
-            <li><a class="dropdown-item" href="settings.php"><i class="bi bi-gear me-2 text-muted"></i> Store Settings</a></li>
-            <li><hr class="dropdown-divider"></li>
-            <li><a class="dropdown-item text-danger" href="logout.php"><i class="bi bi-box-arrow-right me-2"></i> Logout</a></li>
-          </ul>
+
+          <div class="dropdown">
+            <a href="#" class="d-flex align-items-center text-decoration-none dropdown-toggle text-dark" data-bs-toggle="dropdown" aria-expanded="false">
+              <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop" class="admin-avatar me-2" alt="Admin">
+              <div class="d-none d-sm-block text-start">
+                <div class="fw-semibold small leading-none"><?= htmlspecialchars($_SESSION['user_name'] ?? 'Admin') ?></div>
+                <div class="text-muted" style="font-size: 0.7rem;"><?= htmlspecialchars($_SESSION['user_role'] ?? 'Store Manager') ?></div>
+              </div>
+            </a>
+            <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
+              <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2 text-muted"></i> My Profile</a></li>
+              <li><a class="dropdown-item" href="settings.php"><i class="bi bi-gear me-2 text-muted"></i> Store Settings</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item text-danger" href="logout.php"><i class="bi bi-box-arrow-right me-2"></i> Logout</a></li>
+            </ul>
+          </div>
         </div>
-      </div>
-    </header>
-    
+      </header>
 
       <main class="admin-content">
         
-    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-3">
-      <div>
-        <h1 class="page-title">Warehouse Inventory Tracking</h1>
-        <p class="page-subtitle">Real-time stock ledger across Lahore & Karachi fulfillment hubs.</p>
-      </div>
-      <div class="d-flex gap-2">
-        <button class="btn btn-sm btn-dark" data-bs-toggle="modal" data-bs-target="#stockAdjustModal">
-          <i class="bi bi-arrow-down-up me-1"></i> Quick Stock Adjustment
-        </button>
-      </div>
-    </div>
-
-    <div class="admin-card">
-      <div class="admin-table-wrap">
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>Footwear Model</th>
-              <th>SKU</th>
-              <th>Available Stock</th>
-              <th>Reserved in Cart</th>
-              <th>Reorder Level</th>
-              <th>Stock Status</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody class="filterable-table-body">
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1614252235316-8c857d38b5f4?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Regal Wholecut Oxford">
-                    <div>
-                      <strong class="text-dark">Regal Wholecut Oxford</strong>
-                      <div class="text-muted small">Formal Shoes</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-OXF-01</code></td>
-                <td class="fw-bold">28 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>8 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1533867617858-e7b97e060509?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Sienna Burnished Penny Loafer">
-                    <div>
-                      <strong class="text-dark">Sienna Burnished Penny Loafer</strong>
-                      <div class="text-muted small">Loafers</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-PEN-02</code></td>
-                <td class="fw-bold">19 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>5 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1560769629-975ec94e6a86?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Kensington Braided Tassel Loafer">
-                    <div>
-                      <strong class="text-dark">Kensington Braided Tassel Loafer</strong>
-                      <div class="text-muted small">Loafers</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-TAS-03</code></td>
-                <td class="fw-bold">14 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>5 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1543163521-1bf539c55dd2?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Mayfair Double Monk Strap">
-                    <div>
-                      <strong class="text-dark">Mayfair Double Monk Strap</strong>
-                      <div class="text-muted small">Formal Shoes</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-MNK-04</code></td>
-                <td class="fw-bold">12 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>4 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1608256246200-53e635b5b65f?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Khyber Heritage Peshawari Chappal">
-                    <div>
-                      <strong class="text-dark">Khyber Heritage Peshawari Chappal</strong>
-                      <div class="text-muted small">Traditional Footwear</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-PES-05</code></td>
-                <td class="fw-bold">45 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>10 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1638247025967-b4e38f787b76?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Highland Burnished Chelsea Boot">
-                    <div>
-                      <strong class="text-dark">Highland Burnished Chelsea Boot</strong>
-                      <div class="text-muted small">Boots</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-CHE-06</code></td>
-                <td class="fw-bold">18 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>6 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Veloce Minimalist Court Sneaker">
-                    <div>
-                      <strong class="text-dark">Veloce Minimalist Court Sneaker</strong>
-                      <div class="text-muted small">Sneakers / Sports Shoes</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-SNK-07</code></td>
-                <td class="fw-bold">35 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>8 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1603808033192-082d6919d3e1?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Riviera Cross-Strap Leather Sandal">
-                    <div>
-                      <strong class="text-dark">Riviera Cross-Strap Leather Sandal</strong>
-                      <div class="text-muted small">Sandals</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-SND-08</code></td>
-                <td class="fw-bold">22 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>6 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1582898967732-7235a8e0f93a?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Westminster Wingtip Derby Brogue">
-                    <div>
-                      <strong class="text-dark">Westminster Wingtip Derby Brogue</strong>
-                      <div class="text-muted small">Formal Shoes</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-BRO-09</code></td>
-                <td class="fw-bold">16 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>5 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Amalfi Velour Suede Loafer">
-                    <div>
-                      <strong class="text-dark">Amalfi Velour Suede Loafer</strong>
-                      <div class="text-muted small">Loafers</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-SUE-10</code></td>
-                <td class="fw-bold">15 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>4 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1520639888713-7851133b1ed0?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Sahara Sand Suede Chukka Boot">
-                    <div>
-                      <strong class="text-dark">Sahara Sand Suede Chukka Boot</strong>
-                      <div class="text-muted small">Boots</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-CHK-11</code></td>
-                <td class="fw-bold">9 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>4 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1575537302964-96cd47c06b1b?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Monaco Pebble-Grain Driving Shoe">
-                    <div>
-                      <strong class="text-dark">Monaco Pebble-Grain Driving Shoe</strong>
-                      <div class="text-muted small">Casual Shoes</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-DRV-12</code></td>
-                <td class="fw-bold">24 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>6 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1608256246200-53e635b5b65f?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Waziristan Kaptaan Chappal">
-                    <div>
-                      <strong class="text-dark">Waziristan Kaptaan Chappal</strong>
-                      <div class="text-muted small">Traditional Footwear</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-KAP-13</code></td>
-                <td class="fw-bold">38 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>10 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1614252235316-8c857d38b5f4?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Edinburgh Plain Toe Derby">
-                    <div>
-                      <strong class="text-dark">Edinburgh Plain Toe Derby</strong>
-                      <div class="text-muted small">Formal Shoes</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-DER-14</code></td>
-                <td class="fw-bold">20 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>5 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Aerolight Knit Lifestyle Trainer">
-                    <div>
-                      <strong class="text-dark">Aerolight Knit Lifestyle Trainer</strong>
-                      <div class="text-muted small">Sneakers / Sports Shoes</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-RUN-15</code></td>
-                <td class="fw-bold">31 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>8 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1575537302964-96cd47c06b1b?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Savoy Quilted Velvet Mule Slipper">
-                    <div>
-                      <strong class="text-dark">Savoy Quilted Velvet Mule Slipper</strong>
-                      <div class="text-muted small">Slippers</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-SLP-16</code></td>
-                <td class="fw-bold">17 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>4 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1603808033192-082d6919d3e1?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Balochi Traditional Embroidered Sandal">
-                    <div>
-                      <strong class="text-dark">Balochi Traditional Embroidered Sandal</strong>
-                      <div class="text-muted small">Traditional Footwear</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-BAL-17</code></td>
-                <td class="fw-bold">25 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>6 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1549298916-b41d501d3772?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Himalayan Rugged Combat Boot">
-                    <div>
-                      <strong class="text-dark">Himalayan Rugged Combat Boot</strong>
-                      <div class="text-muted small">Boots</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-BOT-18</code></td>
-                <td class="fw-bold">11 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>3 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1560769629-975ec94e6a86?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Verona Perforated Derby Sneaker">
-                    <div>
-                      <strong class="text-dark">Verona Perforated Derby Sneaker</strong>
-                      <div class="text-muted small">Casual Shoes</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-CAS-19</code></td>
-                <td class="fw-bold">27 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>7 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1603808033192-082d6919d3e1?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Atlas Ergonomic Comfort Slide">
-                    <div>
-                      <strong class="text-dark">Atlas Ergonomic Comfort Slide</strong>
-                      <div class="text-muted small">Sandals</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-SND-20</code></td>
-                <td class="fw-bold">33 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>8 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1575537302964-96cd47c06b1b?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Carlton Suede Outdoor Slipper">
-                    <div>
-                      <strong class="text-dark">Carlton Suede Outdoor Slipper</strong>
-                      <div class="text-muted small">Slippers</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-SLP-21</code></td>
-                <td class="fw-bold">21 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>5 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1549298916-b41d501d3772?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Milano Retro High-Top Sneaker">
-                    <div>
-                      <strong class="text-dark">Milano Retro High-Top Sneaker</strong>
-                      <div class="text-muted small">Sneakers / Sports Shoes</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-SNK-22</code></td>
-                <td class="fw-bold">14 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>5 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1533867617858-e7b97e060509?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Portofino Woven Leather Penny Loafer">
-                    <div>
-                      <strong class="text-dark">Portofino Woven Leather Penny Loafer</strong>
-                      <div class="text-muted small">Loafers</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-PEN-23</code></td>
-                <td class="fw-bold">8 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>3 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-              <tr>
-                <td>
-                  <div class="d-flex align-items-center gap-3">
-                    <img src="https://images.unsplash.com/photo-1614252235316-8c857d38b5f4?q=80&w=800&auto=format&fit=crop" class="rounded-1" style="width: 40px; height: 40px; object-fit: cover;" alt="Cambridge Cap-Toe Semi-Brogue">
-                    <div>
-                      <strong class="text-dark">Cambridge Cap-Toe Semi-Brogue</strong>
-                      <div class="text-muted small">Formal Shoes</div>
-                    </div>
-                  </div>
-                </td>
-                <td><code>NF-OXF-24</code></td>
-                <td class="fw-bold">22 pairs</td>
-                <td class="text-muted">2 pairs</td>
-                <td>6 pairs</td>
-                <td>
-                  <span class="badge bg-success">
-                    In Stock
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-secondary py-1 px-2" data-bs-toggle="modal" data-bs-target="#stockAdjustModal" title="Adjust stock"><i class="bi bi-pencil-square"></i> Adjust</button>
-                </td>
-              </tr>
-            
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Stock Adjust Modal -->
-    <div class="modal fade" id="stockAdjustModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title fs-6 fw-bold">Stock Adjustment Form</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <!-- Page Title & Header Actions -->
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-3">
+          <div>
+            <h1 class="page-title">Warehouse Inventory Tracking</h1>
+            <p class="page-subtitle">Real-time stock ledger across all footwear models and sizes.</p>
           </div>
-          <div class="modal-body">
-            <div class="mb-3">
-              <label class="form-label small fw-bold">Select Footwear Model</label>
-              <select class="form-select">
-                <option>Regal Wholecut Oxford (NF-OXF-01)</option><option>Sienna Burnished Penny Loafer (NF-PEN-02)</option><option>Kensington Braided Tassel Loafer (NF-TAS-03)</option><option>Mayfair Double Monk Strap (NF-MNK-04)</option><option>Khyber Heritage Peshawari Chappal (NF-PES-05)</option><option>Highland Burnished Chelsea Boot (NF-CHE-06)</option><option>Veloce Minimalist Court Sneaker (NF-SNK-07)</option><option>Riviera Cross-Strap Leather Sandal (NF-SND-08)</option><option>Westminster Wingtip Derby Brogue (NF-BRO-09)</option><option>Amalfi Velour Suede Loafer (NF-SUE-10)</option><option>Sahara Sand Suede Chukka Boot (NF-CHK-11)</option><option>Monaco Pebble-Grain Driving Shoe (NF-DRV-12)</option><option>Waziristan Kaptaan Chappal (NF-KAP-13)</option><option>Edinburgh Plain Toe Derby (NF-DER-14)</option><option>Aerolight Knit Lifestyle Trainer (NF-RUN-15)</option><option>Savoy Quilted Velvet Mule Slipper (NF-SLP-16)</option><option>Balochi Traditional Embroidered Sandal (NF-BAL-17)</option><option>Himalayan Rugged Combat Boot (NF-BOT-18)</option><option>Verona Perforated Derby Sneaker (NF-CAS-19)</option><option>Atlas Ergonomic Comfort Slide (NF-SND-20)</option><option>Carlton Suede Outdoor Slipper (NF-SLP-21)</option><option>Milano Retro High-Top Sneaker (NF-SNK-22)</option><option>Portofino Woven Leather Penny Loafer (NF-PEN-23)</option><option>Cambridge Cap-Toe Semi-Brogue (NF-OXF-24)</option>
-              </select>
-            </div>
-            <div class="row g-2 mb-3">
-              <div class="col-6">
-                <label class="form-label small fw-bold">Adjustment Type</label>
-                <select class="form-select">
-                  <option>Add Inventory (+ Received)</option>
-                  <option>Subtract (- Damaged / Returned)</option>
-                </select>
-              </div>
-              <div class="col-6">
-                <label class="form-label small fw-bold">Quantity</label>
-                <input type="number" class="form-control" value="10">
-              </div>
-            </div>
-            <div class="mb-3">
-              <label class="form-label small fw-bold">Reason Note</label>
-              <input type="text" class="form-control" placeholder="e.g. Sialkot workshop shipment batch #4">
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-            <button type="button" class="btn btn-sm btn-dark" id="btnConfirmStockAdjust">Record Adjustment</button>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-dark" data-bs-toggle="modal" data-bs-target="#stockAdjustModal">
+              <i class="bi bi-arrow-down-up me-1"></i> Quick Stock Adjustment
+            </button>
           </div>
         </div>
-      </div>
-    </div>
-  
+
+        <!-- Feedback Alerts -->
+        <?php if (!empty($errors)): ?>
+          <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+            <ul class="mb-0">
+              <?php foreach ($errors as $err): ?>
+                <li><?= htmlspecialchars($err) ?></li>
+              <?php endforeach; ?>
+            </ul>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        <?php endif; ?>
+
+        <?php if (!empty($success)): ?>
+          <div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+            <i class="bi bi-check-circle me-2"></i><?= htmlspecialchars($success) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        <?php endif; ?>
+
+        <!-- KPI Summary Cards -->
+        <div class="row g-3 mb-4">
+          <div class="col-sm-6 col-xl-3">
+            <div class="admin-card p-3 d-flex align-items-center justify-content-between">
+              <div>
+                <span class="text-muted small text-uppercase fw-bold">Total Stock</span>
+                <h3 class="fw-bold mb-0 text-dark"><?= number_format($stats['total_units']) ?> <small class="fs-6 fw-normal text-muted">pairs</small></h3>
+              </div>
+              <div class="rounded-circle bg-primary bg-opacity-10 text-primary p-3">
+                <i class="bi bi-boxes fs-4"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-sm-6 col-xl-3">
+            <div class="admin-card p-3 d-flex align-items-center justify-content-between">
+              <div>
+                <span class="text-muted small text-uppercase fw-bold">Active Models</span>
+                <h3 class="fw-bold mb-0 text-dark"><?= (int)$stats['total_models'] ?> <small class="fs-6 fw-normal text-muted">styles</small></h3>
+              </div>
+              <div class="rounded-circle bg-info bg-opacity-10 text-info p-3">
+                <i class="bi bi-layers fs-4"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-sm-6 col-xl-3">
+            <a href="inventory.php?filter=low" class="text-decoration-none">
+              <div class="admin-card p-3 d-flex align-items-center justify-content-between border <?= ($stats['low_stock_count'] > 0) ? 'border-warning' : '' ?>">
+                <div>
+                  <span class="text-muted small text-uppercase fw-bold">Low Stock Alert</span>
+                  <h3 class="fw-bold mb-0 text-warning"><?= (int)$stats['low_stock_count'] ?> <small class="fs-6 fw-normal text-muted">models</small></h3>
+                </div>
+                <div class="rounded-circle bg-warning bg-opacity-10 text-warning p-3">
+                  <i class="bi bi-exclamation-triangle fs-4"></i>
+                </div>
+              </div>
+            </a>
+          </div>
+
+          <div class="col-sm-6 col-xl-3">
+            <a href="inventory.php?filter=out" class="text-decoration-none">
+              <div class="admin-card p-3 d-flex align-items-center justify-content-between border <?= ($stats['out_of_stock_count'] > 0) ? 'border-danger' : '' ?>">
+                <div>
+                  <span class="text-muted small text-uppercase fw-bold">Out of Stock</span>
+                  <h3 class="fw-bold mb-0 text-danger"><?= (int)$stats['out_of_stock_count'] ?> <small class="fs-6 fw-normal text-muted">models</small></h3>
+                </div>
+                <div class="rounded-circle bg-danger bg-opacity-10 text-danger p-3">
+                  <i class="bi bi-x-circle fs-4"></i>
+                </div>
+              </div>
+            </a>
+          </div>
+        </div>
+
+        <!-- Filter Pills Bar -->
+        <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+          <span class="small text-muted fw-bold me-2">Quick Filter:</span>
+          <a href="inventory.php" class="btn btn-sm <?= ($stockFilter === '') ? 'btn-dark' : 'btn-outline-secondary' ?>">
+            All (<?= (int)$stats['total_models'] ?>)
+          </a>
+          <a href="inventory.php?filter=in" class="btn btn-sm <?= ($stockFilter === 'in') ? 'btn-dark' : 'btn-outline-secondary' ?>">
+            In Stock
+          </a>
+          <a href="inventory.php?filter=low" class="btn btn-sm <?= ($stockFilter === 'low') ? 'btn-warning text-dark' : 'btn-outline-warning text-dark' ?>">
+            Low Stock (<?= (int)$stats['low_stock_count'] ?>)
+          </a>
+          <a href="inventory.php?filter=out" class="btn btn-sm <?= ($stockFilter === 'out') ? 'btn-danger' : 'btn-outline-danger' ?>">
+            Out of Stock (<?= (int)$stats['out_of_stock_count'] ?>)
+          </a>
+        </div>
+
+        <!-- Inventory Table Card -->
+        <div class="admin-card">
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>Footwear Model</th>
+                  <th>SKU</th>
+                  <th>Category / Brand</th>
+                  <th>Available Stock</th>
+                  <th>Reorder Threshold</th>
+                  <th>Stock Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody class="filterable-table-body">
+                <?php if (!empty($inventory)): ?>
+                  <?php foreach ($inventory as $item): ?>
+                    <?php 
+                      $imgSrc = htmlspecialchars($item['image_url'] ?? '');
+                      if (!$imgSrc) {
+                          $imgSrc = 'https://images.unsplash.com/photo-1614252235316-8c857d38b5f4?q=80&w=200&auto=format&fit=crop';
+                      }
+                      
+                      $stock = (int)$item['stock_quantity'];
+                      $threshold = (int)$item['low_stock_threshold'];
+                      
+                      if ($stock <= 0) {
+                          $badgeClass = 'bg-danger';
+                          $statusLabel = 'Out of Stock';
+                      } elseif ($stock <= $threshold) {
+                          $badgeClass = 'bg-warning text-dark';
+                          $statusLabel = 'Low Stock';
+                      } else {
+                          $badgeClass = 'bg-success';
+                          $statusLabel = 'In Stock';
+                      }
+                    ?>
+                    <tr>
+                      <td>
+                        <div class="d-flex align-items-center gap-3">
+                          <img src="<?= $imgSrc ?>" class="rounded-1" style="width: 44px; height: 44px; object-fit: cover;" alt="<?= htmlspecialchars($item['name']) ?>">
+                          <div>
+                            <strong class="text-dark d-block"><?= htmlspecialchars($item['name']) ?></strong>
+                            <small class="text-muted"><?= htmlspecialchars($item['category_name'] ?? 'Footwear') ?></small>
+                          </div>
+                        </div>
+                      </td>
+                      <td><code><?= htmlspecialchars($item['sku']) ?></code></td>
+                      <td>
+                        <div class="small">
+                          <span class="text-muted">Cat:</span> <?= htmlspecialchars($item['category_name'] ?? '—') ?><br>
+                          <span class="text-muted">Brand:</span> <?= htmlspecialchars($item['brand_name'] ?? '—') ?>
+                        </div>
+                      </td>
+                      <td>
+                        <strong class="fs-6 <?= ($stock <= 0) ? 'text-danger' : (($stock <= $threshold) ? 'text-warning' : 'text-dark') ?>">
+                          <?= $stock ?> pairs
+                        </strong>
+                      </td>
+                      <td class="text-muted">
+                        <?= $threshold ?> pairs
+                      </td>
+                      <td>
+                        <span class="badge <?= $badgeClass ?>">
+                          <?= $statusLabel ?>
+                        </span>
+                      </td>
+                      <td>
+                        <button type="button" 
+                                class="btn btn-sm btn-outline-dark py-1 px-2 btn-adjust-stock" 
+                                data-id="<?= (int)$item['id'] ?>" 
+                                data-name="<?= htmlspecialchars($item['name']) ?>" 
+                                data-sku="<?= htmlspecialchars($item['sku']) ?>"
+                                data-stock="<?= $stock ?>" 
+                                data-bs-toggle="modal" 
+                                data-bs-target="#stockAdjustModal" 
+                                title="Adjust stock">
+                          <i class="bi bi-pencil-square me-1"></i> Adjust
+                        </button>
+                      </td>
+                    </tr>
+                  <?php endforeach; ?>
+                <?php else: ?>
+                  <tr>
+                    <td colspan="7" class="text-center py-5 text-muted">
+                      <div class="mb-2"><i class="bi bi-boxes fs-1 text-secondary"></i></div>
+                      <h6 class="fw-bold text-dark mb-2">No Footwear Models Found</h6>
+                      <p class="mb-3 small">No inventory matches your current selection.</p>
+                      <?php if ($stockFilter !== ''): ?>
+                        <a href="inventory.php" class="btn btn-sm btn-outline-dark">
+                          <i class="bi bi-x-circle me-1"></i> Clear Filter
+                        </a>
+                      <?php else: ?>
+                        <a href="product-add.php" class="btn btn-sm btn-dark">
+                          <i class="bi bi-plus-lg me-1"></i> Add Your First Product
+                        </a>
+                      <?php endif; ?>
+                    </td>
+                  </tr>
+                <?php endif; ?>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="p-3 border-top d-flex justify-content-between align-items-center">
+            <span class="small text-muted">Showing <?= count($inventory) ?> item(s)</span>
+          </div>
+        </div>
+
       </main>
     </div>
   </div>
 
-  <!-- Delete Confirmation Modal (Shared) -->
-  <div class="modal fade" id="deleteConfirmModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-sm">
-      <div class="modal-content border-0 shadow">
-        <div class="modal-body text-center p-4">
-          <div class="text-danger fs-1 mb-2"><i class="bi bi-exclamation-circle"></i></div>
-          <h5 class="fw-bold mb-2">Confirm Delete?</h5>
-          <p class="text-muted small mb-4">Are you sure you want to remove <strong id="deleteTargetName">this item</strong> from the database? This action is simulated for the prototype.</p>
-          <div class="d-flex justify-content-center gap-2">
-            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-            <button type="button" class="btn btn-sm btn-danger px-3" id="btnConfirmDelete">Delete</button>
+  <!-- Stock Adjust Modal -->
+  <div class="modal fade" id="stockAdjustModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <form action="actions/handle_adjust_stock.php" method="POST">
+          <div class="modal-header">
+            <h5 class="modal-title fs-6 fw-bold">Stock Adjustment Form</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
-        </div>
+          <div class="modal-body">
+            
+            <div class="mb-3">
+              <label class="form-label small fw-bold">Select Footwear Model</label>
+              <select name="product_id" id="modalProductSelect" class="form-select" required>
+                <option value="">-- Choose a Product --</option>
+                <?php foreach ($allProducts as $p): ?>
+                  <option value="<?= (int)$p['id'] ?>">
+                    <?= htmlspecialchars($p['name']) ?> (<?= htmlspecialchars($p['sku']) ?>) — Current: <?= (int)$p['stock_quantity'] ?> pairs
+                  </option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+
+            <div class="row g-2 mb-3">
+              <div class="col-6">
+                <label class="form-label small fw-bold">Adjustment Type</label>
+                <select name="action_type" id="modalActionType" class="form-select" required>
+                  <option value="add">Add Stock (+ Received / Restocked)</option>
+                  <option value="subtract">Deduct Stock (- Damaged / Correction)</option>
+                </select>
+              </div>
+              <div class="col-6">
+                <label class="form-label small fw-bold">Quantity (Pairs)</label>
+                <input type="number" name="quantity" class="form-control" value="5" min="1" required>
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label small fw-bold">Reason Note (Optional)</label>
+              <input type="text" name="reference_note" class="form-control" placeholder="e.g. Sialkot workshop shipment batch #4">
+            </div>
+
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-sm btn-dark">Record Adjustment</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="assets/js/dashboard.js"></script>
+  <script>
+    // When clicking 'Adjust' on any table row, auto-select that product in the modal
+    document.querySelectorAll('.btn-adjust-stock').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const prodId = this.getAttribute('data-id');
+        const select = document.getElementById('modalProductSelect');
+        if (select && prodId) {
+          select.value = prodId;
+        }
+      });
+    });
+  </script>
 </body>
 </html>

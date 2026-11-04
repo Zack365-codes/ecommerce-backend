@@ -145,10 +145,15 @@ function getBrandInitials($name) {
               </div>
               <h5 class="fw-bold fs-6 mb-1 text-dark"><?= htmlspecialchars($brand['name']) ?></h5>
               <div>
-                <span class="badge bg-light text-dark border mb-3"><?= (int)($brand['product_count'] ?? 0) ?> Shoe Models</span>
+                <a href="products.php?brand=<?= (int)$brand['id'] ?>" class="badge bg-light text-dark border mb-3 text-decoration-none" title="Filter products by this brand">
+                  <?= (int)($brand['product_count'] ?? 0) ?> Shoe Models <i class="bi bi-arrow-up-right small"></i>
+                </a>
               </div>
               <p class="text-muted small mb-4">Added <?= !empty($brand['created_at']) ? date('M d, Y', strtotime($brand['created_at'])) : '—' ?></p>
               <div class="d-flex justify-content-center gap-2 mt-auto">
+                <button type="button" class="btn btn-sm btn-outline-dark px-3 btn-edit-brand" data-id="<?= (int)$brand['id'] ?>" data-name="<?= htmlspecialchars($brand['name']) ?>" data-bs-toggle="modal" data-bs-target="#editBrandModal" title="Edit Brand">
+                  <i class="bi bi-pencil me-1"></i> Edit
+                </button>
                 <form action="actions/handle_delete_brand.php" method="POST" onsubmit="return confirm('Are you sure you want to delete brand \'<?= htmlspecialchars(addslashes($brand['name'])) ?>\'?');">
                   <input type="hidden" name="id" value="<?= (int)$brand['id'] ?>">
                   <button type="submit" class="btn btn-sm btn-outline-danger px-3" title="Delete Brand">
@@ -197,6 +202,34 @@ function getBrandInitials($name) {
         </div>
       </div>
     </div>
+
+    <!-- Edit Brand Modal -->
+    <div class="modal fade" id="editBrandModal" tabindex="-1" aria-labelledby="editBrandModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <form action="actions/handle_edit_brand.php" method="POST">
+            <input type="hidden" name="id" id="editBrandId" value="">
+            <div class="modal-header">
+              <h5 class="modal-title fs-6 fw-bold" id="editBrandModalLabel">Edit Brand Label</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label for="editBrandName" class="form-label small fw-bold">Brand Name <span class="text-danger">*</span></label>
+                <input type="text" name="name" id="editBrandName" class="form-control" placeholder="e.g. SHOES LAB Black Label" required maxlength="120" autocomplete="off">
+                <div class="form-text small text-muted">Duplicate brand names are automatically prevented.</div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-sm btn-dark">
+                <i class="bi bi-check-lg me-1"></i> Update Brand
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
   
       </main>
     </div>
@@ -221,5 +254,15 @@ function getBrandInitials($name) {
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="assets/js/dashboard.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.btn-edit-brand').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          document.getElementById('editBrandId').value = this.getAttribute('data-id');
+          document.getElementById('editBrandName').value = this.getAttribute('data-name');
+        });
+      });
+    });
+  </script>
 </body>
 </html>
