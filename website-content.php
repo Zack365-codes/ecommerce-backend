@@ -1,6 +1,34 @@
 <?php 
 require_once __DIR__ . '/settings/session.php';
 require_once __DIR__ . '/settings/auth.php';
+require_once __DIR__ . '/settings/db.php';
+
+$errors  = $_SESSION['errors']  ?? [];
+$success = $_SESSION['success'] ?? '';
+unset($_SESSION['errors'], $_SESSION['success']);
+
+// Ensure table exists
+mysqli_query($conn, "CREATE TABLE IF NOT EXISTS `website_content` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `hero_headline` VARCHAR(255) NOT NULL,
+  `hero_subtitle` VARCHAR(255) NOT NULL,
+  `hero_description` TEXT NOT NULL,
+  `promo_headline` VARCHAR(255) NOT NULL,
+  `promo_cta_text` VARCHAR(100) NOT NULL,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+// Fetch saved content row
+$contentRes = mysqli_query($conn, "SELECT * FROM website_content WHERE id = 1");
+$content = $contentRes ? mysqli_fetch_assoc($contentRes) : null;
+
+// Default fallback values if empty
+$heroHeadline    = $content['hero_headline']    ?? 'Step Into Uncompromising Refinement.';
+$heroSubtitle    = $content['hero_subtitle']    ?? 'Autumn / Winter 2026 Collection';
+$heroDescription = $content['hero_description'] ?? 'Handcrafted from full-grain Italian calfskin and Goodyear-welted for generations of distinction. Engineered for the modern Pakistani gentleman.';
+$promoHeadline   = $content['promo_headline']   ?? 'The Goodyear Welted Oxford Experience';
+$promoCtaText    = $content['promo_cta_text']    ?? 'Discover The Oxford';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -81,7 +109,26 @@ require_once __DIR__ . '/settings/auth.php';
       </div>
     </div>
 
-    <form class="admin-demo-form" data-success-msg="Storefront homepage content updated!">
+    <!-- Alert Messages -->
+    <?php if (!empty($errors)): ?>
+      <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+        <ul class="mb-0">
+          <?php foreach ($errors as $err): ?>
+            <li><?= htmlspecialchars($err) ?></li>
+          <?php endforeach; ?>
+        </ul>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    <?php endif; ?>
+
+    <?php if (!empty($success)): ?>
+      <div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+        <i class="bi bi-check-circle me-2"></i><?= htmlspecialchars($success) ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    <?php endif; ?>
+
+    <form action="actions/handle_update_content.php" method="POST">
       <div class="row g-4">
         
         <div class="col-lg-8">
@@ -92,15 +139,15 @@ require_once __DIR__ . '/settings/auth.php';
             <div class="admin-card-body">
               <div class="mb-3">
                 <label class="form-label small fw-bold">Main Headline</label>
-                <input type="text" class="form-control" value="Step Into Uncompromising Refinement.">
+                <input type="text" name="hero_headline" class="form-control" value="<?= htmlspecialchars($heroHeadline) ?>" required>
               </div>
               <div class="mb-3">
                 <label class="form-label small fw-bold">Subtitle</label>
-                <input type="text" class="form-control" value="Autumn / Winter 2026 Collection">
+                <input type="text" name="hero_subtitle" class="form-control" value="<?= htmlspecialchars($heroSubtitle) ?>">
               </div>
               <div class="mb-3">
                 <label class="form-label small fw-bold">Lead Paragraph</label>
-                <textarea class="form-control" rows="2">Handcrafted from full-grain Italian calfskin and Goodyear-welted for generations of distinction. Engineered for the modern Pakistani gentleman.</textarea>
+                <textarea name="hero_description" class="form-control" rows="3"><?= htmlspecialchars($heroDescription) ?></textarea>
               </div>
             </div>
           </div>
@@ -111,24 +158,40 @@ require_once __DIR__ . '/settings/auth.php';
             <div class="admin-card-body">
               <div class="mb-3">
                 <label class="form-label small fw-bold">Banner Headline</label>
-                <input type="text" class="form-control" value="The Goodyear Welted Oxford Experience">
+                <input type="text" name="promo_headline" class="form-control" value="<?= htmlspecialchars($promoHeadline) ?>" required>
               </div>
               <div class="mb-3">
                 <label class="form-label small fw-bold">Call to Action Button</label>
-                <input type="text" class="form-control" value="Discover The Oxford">
+                <input type="text" name="promo_cta_text" class="form-control" value="<?= htmlspecialchars($promoCtaText) ?>">
               </div>
             </div>
           </div>
 
-          <button type="submit" class="btn btn-dark px-4 py-2">Save Content Revisions</button>
+          <button type="submit" class="btn btn-dark px-4 py-2">
+            <i class="bi bi-check2-circle me-1"></i> Save Content Revisions
+          </button>
 
         </div>
 
         <div class="col-lg-4">
           <div class="admin-card">
-            <div class="admin-card-header"><h5 class="admin-card-title">Notice</h5></div>
+            <div class="admin-card-header"><h5 class="admin-card-title">Database Status</h5></div>
             <div class="admin-card-body small text-muted">
-              Content edits update static presentation prototypes immediately upon saving.
+              <p class="mb-2"><strong>Table:</strong> <code>website_content</code></p>
+              <p class="mb-2"><strong>Fields Managed:</strong></p>
+              <ul class="ps-3 mb-3">
+                <li><code>hero_headline</code></li>
+                <li><code>hero_subtitle</code></li>
+                <li><code>hero_description</code></li>
+                <li><code>promo_headline</code></li>
+                <li><code>promo_cta_text</code></li>
+              </ul>
+              <div class="border-top pt-2">
+                <span class="text-muted">Last Updated:</span><br>
+                <strong class="text-dark">
+                  <?= !empty($content['updated_at']) ? date('M d, Y h:i A', strtotime($content['updated_at'])) : 'Not updated yet' ?>
+                </strong>
+              </div>
             </div>
           </div>
         </div>
