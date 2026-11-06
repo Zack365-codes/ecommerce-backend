@@ -72,6 +72,23 @@ if ($allProdRes) {
         $allProducts[] = $row;
     }
 }
+
+// 5. Fetch all variants grouped by product_id
+$variantsByProduct = [];
+$varRes = @mysqli_query($conn, "SELECT id, product_id, sku_variant, size_eu, color_name, stock_quantity, status FROM product_variants ORDER BY size_eu ASC");
+if ($varRes) {
+    while ($v = mysqli_fetch_assoc($varRes)) {
+        $variantsByProduct[(int)$v['product_id']][] = [
+            'id'             => (int)$v['id'],
+            'product_id'     => (int)$v['product_id'],
+            'sku_variant'    => $v['sku_variant'],
+            'size_eu'        => (int)$v['size_eu'],
+            'color_name'     => $v['color_name'],
+            'stock_quantity' => (int)$v['stock_quantity'],
+            'status'         => $v['status']
+        ];
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -273,11 +290,25 @@ if ($allProdRes) {
                     ?>
                     <tr>
                       <td>
-                        <div class="d-flex align-items-center gap-3">
-                          <img src="<?= $imgSrc ?>" class="rounded-1" style="width: 44px; height: 44px; object-fit: cover;" alt="<?= htmlspecialchars($item['name']) ?>">
+                        <div class="d-flex align-items-start gap-3">
+                          <img src="<?= $imgSrc ?>" class="rounded-1 mt-1" style="width: 44px; height: 44px; object-fit: cover;" alt="<?= htmlspecialchars($item['name']) ?>">
                           <div>
                             <strong class="text-dark d-block"><?= htmlspecialchars($item['name']) ?></strong>
                             <small class="text-muted"><?= htmlspecialchars($item['category_name'] ?? 'Footwear') ?></small>
+                            <?php $prodVars = $variantsByProduct[(int)$item['id']] ?? []; ?>
+                            <?php if (!empty($prodVars)): ?>
+                              <div class="d-flex flex-wrap gap-1 mt-2">
+                                <?php foreach ($prodVars as $v): ?>
+                                  <?php 
+                                    $vStock = (int)$v['stock_quantity'];
+                                    $vClass = ($vStock <= 0) ? 'bg-danger text-white' : (($vStock <= 2) ? 'bg-warning text-dark' : 'bg-light text-dark border');
+                                  ?>
+                                  <span class="badge <?= $vClass ?>" style="font-size: 0.68rem;" title="<?= htmlspecialchars($v['color_name']) ?>: <?= $vStock ?> pairs">
+                                    EU <?= (int)$v['size_eu'] ?>: <strong><?= $vStock ?></strong>
+                                  </span>
+                                <?php endforeach; ?>
+                              </div>
+                            <?php endif; ?>
                           </div>
                         </div>
                       </td>
@@ -347,52 +378,111 @@ if ($allProdRes) {
     </div>
   </div>
 
-  <!-- Stock Adjust Modal -->
+  <!-- Stock Adjust Modal with Variant Management -->
   <div class="modal fade" id="stockAdjustModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
       <div class="modal-content">
-        <form action="actions/handle_adjust_stock.php" method="POST">
+        <form action="actions/handle_adjust_stock.php" method="POST" id="stockAdjustForm">
           <div class="modal-header">
-            <h5 class="modal-title fs-6 fw-bold">Stock Adjustment Form</h5>
+            <h5 class="modal-title fs-6 fw-bold">Stock & Variant Adjustment</h5>
             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
           <div class="modal-body">
             
+            <!-- Select Product -->
             <div class="mb-3">
               <label class="form-label small fw-bold">Select Footwear Model</label>
-              <select name="product_id" id="modalProductSelect" class="form-select" required>
+              <select name="product_id" id="modalProductSelect" class="form-select" required onchange="onModalProductChange(this.value)">
                 <option value="">-- Choose a Product --</option>
                 <?php foreach ($allProducts as $p): ?>
                   <option value="<?= (int)$p['id'] ?>">
-                    <?= htmlspecialchars($p['name']) ?> (<?= htmlspecialchars($p['sku']) ?>) — Current: <?= (int)$p['stock_quantity'] ?> pairs
+                    <?= htmlspecialchars($p['name']) ?> (<?= htmlspecialchars($p['sku']) ?>) — Total Stock: <?= (int)$p['stock_quantity'] ?> pairs
                   </option>
                 <?php endforeach; ?>
               </select>
             </div>
 
-            <div class="row g-2 mb-3">
-              <div class="col-6">
-                <label class="form-label small fw-bold">Adjustment Type</label>
-                <select name="action_type" id="modalActionType" class="form-select" required>
-                  <option value="add">Add Stock (+ Received / Restocked)</option>
-                  <option value="subtract">Deduct Stock (- Damaged / Correction)</option>
-                </select>
+            <!-- Nav Tabs: Quick Adjust vs Direct Edit Sizes -->
+            <ul class="nav nav-pills nav-fill mb-3 p-1 bg-light rounded" id="adjustTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active py-1 small fw-semibold" id="tab-quick-link" data-bs-toggle="pill" data-bs-target="#tab-quick-pane" type="button" role="tab" onclick="setAdjustMode('quick')">
+                  <i class="bi bi-plus-slash-minus me-1"></i> Quick Adjust (+ / -)
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link py-1 small fw-semibold" id="tab-direct-link" data-bs-toggle="pill" data-bs-target="#tab-direct-pane" type="button" role="tab" onclick="setAdjustMode('direct_variants')">
+                  <i class="bi bi-grid-3x3 me-1"></i> Edit Size Quantities Directly
+                </button>
+              </li>
+            </ul>
+
+            <input type="hidden" name="adjust_mode" id="adjustModeInput" value="quick">
+
+            <div class="tab-content" id="adjustTabsContent">
+              <!-- Tab 1: Quick Adjust (+/-) -->
+              <div class="tab-pane fade show active" id="tab-quick-pane" role="tabpanel">
+                
+                <div class="mb-3">
+                  <label class="form-label small fw-bold">Select Variant Size to Adjust</label>
+                  <select name="variant_id" id="modalVariantSelect" class="form-select">
+                    <option value="0">All Sizes (General Product Stock)</option>
+                  </select>
+                  <div class="form-text small text-muted">Choose a specific size (e.g. EU 41) to adjust only that size, or choose "All Sizes" for general change.</div>
+                </div>
+
+                <div class="row g-2 mb-3">
+                  <div class="col-6">
+                    <label class="form-label small fw-bold">Adjustment Type</label>
+                    <select name="action_type" id="modalActionType" class="form-select">
+                      <option value="add">Add Stock (+ Received / Restocked)</option>
+                      <option value="subtract">Deduct Stock (- Damaged / Correction)</option>
+                    </select>
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label small fw-bold">Quantity (Pairs)</label>
+                    <input type="number" name="quantity" id="modalQuantityInput" class="form-control" value="5" min="1">
+                  </div>
+                </div>
+
               </div>
-              <div class="col-6">
-                <label class="form-label small fw-bold">Quantity (Pairs)</label>
-                <input type="number" name="quantity" class="form-control" value="5" min="1" required>
+
+              <!-- Tab 2: Direct Edit Size Quantities -->
+              <div class="tab-pane fade" id="tab-direct-pane" role="tabpanel">
+                <div class="mb-3">
+                  <label class="form-label small fw-bold mb-1">Variant Size Matrix (Editable)</label>
+                  <p class="text-muted small mb-2">Directly set the stock pairs available for each shoe size:</p>
+                  
+                  <div class="table-responsive border rounded" style="max-height: 250px; overflow-y: auto;">
+                    <table class="table table-sm table-bordered bg-white mb-0 align-middle small">
+                      <thead class="table-light sticky-top">
+                        <tr>
+                          <th>Shoe Size</th>
+                          <th>Colorway</th>
+                          <th>Current Stock</th>
+                          <th style="width: 140px;">New Stock (Pairs)</th>
+                        </tr>
+                      </thead>
+                      <tbody id="modalVariantsTableBody">
+                        <tr>
+                          <td colspan="4" class="text-center py-3 text-muted">Please select a footwear model first.</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div class="mb-3">
-              <label class="form-label small fw-bold">Reason Note (Optional)</label>
-              <input type="text" name="reference_note" class="form-control" placeholder="e.g. Sialkot workshop shipment batch #4">
+            <!-- Optional Reason Note -->
+            <div class="mb-2">
+              <label class="form-label small fw-bold">Audit Reference Note (Optional)</label>
+              <input type="text" name="reference_note" class="form-control" placeholder="e.g. Workshop batch #4 arrival, or inventory audit correction">
             </div>
 
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-            <button type="submit" class="btn btn-sm btn-dark">Record Adjustment</button>
+            <button type="submit" class="btn btn-sm btn-dark" id="modalSubmitBtn">Record Adjustment</button>
           </div>
         </form>
       </div>
@@ -402,6 +492,56 @@ if ($allProdRes) {
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="assets/js/dashboard.js"></script>
   <script>
+    const allVariantsByProduct = <?= json_encode($variantsByProduct) ?>;
+
+    function setAdjustMode(mode) {
+      document.getElementById('adjustModeInput').value = mode;
+      const submitBtn = document.getElementById('modalSubmitBtn');
+      if (mode === 'direct_variants') {
+        submitBtn.textContent = 'Save All Variant Sizes';
+      } else {
+        submitBtn.textContent = 'Record Adjustment';
+      }
+    }
+
+    function onModalProductChange(prodId) {
+      prodId = parseInt(prodId) || 0;
+      const variants = allVariantsByProduct[prodId] || [];
+      
+      // 1. Populate variant dropdown for Quick Adjust tab
+      const varSelect = document.getElementById('modalVariantSelect');
+      varSelect.innerHTML = '<option value="0">All Sizes (General Product Stock)</option>';
+      
+      // 2. Populate direct edit table
+      const tableBody = document.getElementById('modalVariantsTableBody');
+      tableBody.innerHTML = '';
+
+      if (variants.length > 0) {
+        variants.forEach(v => {
+          // Dropdown option
+          const opt = document.createElement('option');
+          opt.value = v.id;
+          opt.textContent = `Size EU ${v.size_eu} (${v.color_name}) — Current: ${v.stock_quantity} pairs`;
+          varSelect.appendChild(opt);
+
+          // Table row for direct edit
+          const tr = document.createElement('tr');
+          const badgeClass = v.stock_quantity <= 0 ? 'bg-danger text-white' : (v.stock_quantity <= 2 ? 'bg-warning text-dark' : 'bg-light text-dark border');
+          tr.innerHTML = `
+            <td><strong>EU ${v.size_eu}</strong></td>
+            <td>${v.color_name}</td>
+            <td><span class="badge ${badgeClass}">${v.stock_quantity} pairs</span></td>
+            <td>
+              <input type="number" name="variant_stocks[${v.id}]" class="form-control form-control-sm" value="${v.stock_quantity}" min="0">
+            </td>
+          `;
+          tableBody.appendChild(tr);
+        });
+      } else {
+        tableBody.innerHTML = '<tr><td colspan="4" class="text-center py-3 text-muted">No individual size variants registered for this product.</td></tr>';
+      }
+    }
+
     // When clicking 'Adjust' on any table row, auto-select that product in the modal
     document.querySelectorAll('.btn-adjust-stock').forEach(btn => {
       btn.addEventListener('click', function() {
@@ -409,6 +549,7 @@ if ($allProdRes) {
         const select = document.getElementById('modalProductSelect');
         if (select && prodId) {
           select.value = prodId;
+          onModalProductChange(prodId);
         }
       });
     });

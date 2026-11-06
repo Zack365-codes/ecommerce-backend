@@ -199,9 +199,14 @@ if (mysqli_stmt_execute($stmt)) {
                    (product_id, sku_variant, size_eu, color_name, stock_quantity, status) 
                    VALUES (?, ?, ?, ?, ?, ?)";
         $varStmt = @mysqli_prepare($conn, $varSql);
+        $processedSizes = [];
         if ($varStmt) {
             foreach ($variantsData as $sizeKey => $v) {
                 $sizeEu    = (int)($v['size'] ?? $sizeKey);
+                if ($sizeEu <= 0 || in_array($sizeEu, $processedSizes, true)) {
+                    continue;
+                }
+                $processedSizes[] = $sizeEu;
                 $color     = trim($v['color'] ?? 'Standard');
                 $stockQty  = isset($v['stock']) ? max(0, (int)$v['stock']) : 0;
                 $varSku    = $sku . '-' . $sizeEu;

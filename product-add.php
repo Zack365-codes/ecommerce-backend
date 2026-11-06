@@ -210,7 +210,7 @@ if ($brandResult) {
               <span class="text-muted small">Auto-calculated total stock</span>
             </div>
             <div class="admin-card-body p-0">
-              <table class="table variant-table table-bordered mb-0 small">
+              <table class="table variant-table table-bordered mb-0 small" id="variantsTable">
                 <thead class="table-light">
                   <tr>
                     <th>Shoe Size</th>
@@ -218,30 +218,46 @@ if ($brandResult) {
                     <th>Variant Suffix</th>
                     <th>Stock Qty</th>
                     <th>Status</th>
+                    <th class="text-center" style="width: 100px;">Action</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody id="variantsTableBody">
                   <?php
                   $sizes = [39, 40, 41, 42, 43, 44, 45, 46];
                   foreach ($sizes as $sz):
                   ?>
-                    <tr>
+                    <tr id="variant-row-<?= $sz ?>">
                       <td>
-                        <strong>EU <?= $sz ?></strong>
-                        <input type="hidden" name="variants[<?= $sz ?>][size]" value="<?= $sz ?>">
+                        <div class="input-group input-group-sm" style="width: 110px;">
+                          <span class="input-group-text bg-white fw-bold">EU</span>
+                          <input type="number" name="variants[<?= $sz ?>][size]" class="form-control form-control-sm fw-bold variant-size-input" value="<?= $sz ?>" min="20" max="65" required>
+                        </div>
                       </td>
                       <td>
                         <input type="text" name="variants[<?= $sz ?>][color]" class="form-control form-control-sm" value="Nero Black">
                       </td>
                       <td><code>-[SKU]-<?= $sz ?></code></td>
                       <td>
-                        <input type="number" name="variants[<?= $sz ?>][stock]" class="form-control form-control-sm" value="4" min="0" style="width: 80px;">
+                        <input type="number" name="variants[<?= $sz ?>][stock]" class="form-control form-control-sm variant-stock-input" value="4" min="0" style="width: 80px;">
                       </td>
                       <td><span class="text-success small"><i class="bi bi-check-circle"></i> Enabled</span></td>
+                      <td class="text-center">
+                        <button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 btn-remove-variant" onclick="removeVariantRow(this)" title="Exclude this size">
+                          <i class="bi bi-trash"></i> Remove
+                        </button>
+                      </td>
                     </tr>
                   <?php endforeach; ?>
                 </tbody>
               </table>
+
+              <!-- Add Variant Button Toolbar -->
+              <div class="p-2 bg-light border-top d-flex align-items-center justify-content-between">
+                <button type="button" class="btn btn-sm btn-dark" onclick="addNewVariantRow()">
+                  <i class="bi bi-plus-lg me-1"></i> Add Another Size Variant
+                </button>
+                <span class="text-muted small">Supports custom EU shoe sizes (e.g. EU 37, 38, 47, 48)</span>
+              </div>
             </div>
           </div>
 
@@ -344,5 +360,53 @@ if ($brandResult) {
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="assets/js/dashboard.js"></script>
+  <script>
+    let variantRowIndex = 100;
+
+    function removeVariantRow(btn) {
+      const row = btn.closest('tr');
+      if (row) {
+        row.remove();
+      }
+    }
+
+    function addNewVariantRow(size = '', color = 'Nero Black', stock = 4) {
+      const tbody = document.getElementById('variantsTableBody');
+      if (!tbody) return;
+
+      // If size not passed, calculate next size
+      if (!size) {
+        const existingSizes = Array.from(tbody.querySelectorAll('.variant-size-input')).map(input => parseInt(input.value) || 0);
+        const maxExisting = existingSizes.length ? Math.max(...existingSizes) : 38;
+        size = maxExisting + 1;
+      }
+
+      const rowId = 'var_' + (++variantRowIndex);
+      const tr = document.createElement('tr');
+      tr.id = 'variant-row-' + rowId;
+      tr.innerHTML = `
+        <td>
+          <div class="input-group input-group-sm" style="width: 110px;">
+            <span class="input-group-text bg-white fw-bold">EU</span>
+            <input type="number" name="variants[${rowId}][size]" class="form-control form-control-sm fw-bold variant-size-input" value="${size}" min="20" max="65" required>
+          </div>
+        </td>
+        <td>
+          <input type="text" name="variants[${rowId}][color]" class="form-control form-control-sm" value="${color}">
+        </td>
+        <td><code>-[SKU]-VAR</code></td>
+        <td>
+          <input type="number" name="variants[${rowId}][stock]" class="form-control form-control-sm variant-stock-input" value="${stock}" min="0" style="width: 80px;">
+        </td>
+        <td><span class="text-success small"><i class="bi bi-check-circle"></i> Enabled</span></td>
+        <td class="text-center">
+          <button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 btn-remove-variant" onclick="removeVariantRow(this)" title="Exclude this size">
+            <i class="bi bi-trash"></i> Remove
+          </button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+  </script>
 </body>
 </html>

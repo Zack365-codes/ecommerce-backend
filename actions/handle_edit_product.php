@@ -230,9 +230,11 @@ if (mysqli_stmt_execute($stmt)) {
     mysqli_stmt_close($stmt);
 
     // 8. Update / Upsert Product Variants
+    $submittedSizes = [];
     if (!empty($variantsData) && is_array($variantsData)) {
         foreach ($variantsData as $sizeKey => $v) {
             $sizeEu    = (int)($v['size'] ?? $sizeKey);
+            $submittedSizes[] = $sizeEu;
             $color     = trim($v['color'] ?? 'Nero Black');
             $stockQty  = isset($v['stock']) ? max(0, (int)$v['stock']) : 0;
             $varSku    = $sku . '-' . $sizeEu;
@@ -264,6 +266,14 @@ if (mysqli_stmt_execute($stmt)) {
                 }
             }
         }
+    }
+
+    // Delete variants that were removed by the admin
+    if (!empty($submittedSizes)) {
+        $sizeList = implode(',', $submittedSizes);
+        @mysqli_query($conn, "DELETE FROM product_variants WHERE product_id = " . (int)$id . " AND size_eu NOT IN ($sizeList)");
+    } elseif (isset($_POST['variants_submitted'])) {
+        @mysqli_query($conn, "DELETE FROM product_variants WHERE product_id = " . (int)$id);
     }
 
     $_SESSION['success'] = "Footwear model '" . htmlspecialchars($name) . "' has been updated successfully!";
