@@ -1,6 +1,44 @@
 <?php 
 require_once __DIR__ . '/settings/session.php';
 require_once __DIR__ . '/settings/auth.php';
+require_once __DIR__ . '/settings/db.php';
+
+$errors  = $_SESSION['errors']  ?? [];
+$success = $_SESSION['success'] ?? '';
+unset($_SESSION['errors'], $_SESSION['success']);
+
+// 1. Fetch current store settings from database
+$settings = [];
+$isKeyValue = false;
+$colCheck = @mysqli_query($conn, "SHOW COLUMNS FROM `store_settings` LIKE 'setting_key'");
+if ($colCheck && mysqli_num_rows($colCheck) > 0) {
+    $isKeyValue = true;
+}
+
+if ($isKeyValue) {
+    // Structure A: Key-Value Table
+    $res = @mysqli_query($conn, "SELECT setting_key, setting_value FROM `store_settings`");
+    if ($res) {
+        while ($row = mysqli_fetch_assoc($res)) {
+            $settings[$row['setting_key']] = $row['setting_value'];
+        }
+    }
+} else {
+    // Structure B: Direct Columns Table
+    $res = @mysqli_query($conn, "SELECT * FROM `store_settings` WHERE id = 1");
+    if ($res && $row = mysqli_fetch_assoc($res)) {
+        $settings = $row;
+    }
+}
+
+// Default Fallback Values
+$brandName        = $settings['brand_name'] ?? 'SHOES LAB';
+$helplinePhone    = $settings['helpline_phone'] ?? '+92 300 8472911';
+$supportEmail     = $settings['support_email'] ?? 'concierge@shoeslab.pk';
+$deliveryFee      = $settings['delivery_fee_pkr'] ?? '250';
+$freeThreshold    = $settings['free_delivery_threshold_pkr'] ?? '10000';
+$deliveryEstimate = $settings['delivery_estimate'] ?? '2-3 business days for major cities (Lahore, Karachi, Islamabad); 3-5 days nationwide.';
+$exchangePolicy   = $settings['exchange_policy'] ?? '15-Day Complimentary Doorstep Exchange for sizing adjustment.';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -81,7 +119,26 @@ require_once __DIR__ . '/settings/auth.php';
       </div>
     </div>
 
-    <form class="admin-demo-form" data-success-msg="Store configuration settings successfully updated!">
+    <!-- Alert Messages -->
+    <?php if (!empty($errors)): ?>
+      <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+        <ul class="mb-0">
+          <?php foreach ($errors as $err): ?>
+            <li><?= htmlspecialchars($err) ?></li>
+          <?php endforeach; ?>
+        </ul>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    <?php endif; ?>
+
+    <?php if (!empty($success)): ?>
+      <div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+        <i class="bi bi-check-circle me-2"></i><?= htmlspecialchars($success) ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    <?php endif; ?>
+
+    <form action="actions/handle_update_settings.php" method="POST">
       <div class="row g-4">
         
         <div class="col-lg-8">
@@ -93,19 +150,19 @@ require_once __DIR__ . '/settings/auth.php';
               <div class="row g-3">
                 <div class="col-md-6">
                   <label class="form-label small fw-bold">Brand Name</label>
-                  <input type="text" class="form-control" value="SHOES LAB">
+                  <input type="text" name="brand_name" class="form-control" value="<?= htmlspecialchars($brandName) ?>" required>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label small fw-bold">Helpline Phone</label>
-                  <input type="text" class="form-control" value="+92 300 8472911">
+                  <input type="text" name="helpline_phone" class="form-control" value="<?= htmlspecialchars($helplinePhone) ?>">
                 </div>
                 <div class="col-md-6">
                   <label class="form-label small fw-bold">Support Email</label>
-                  <input type="email" class="form-control" value="concierge@shoeslab.pk">
+                  <input type="email" name="support_email" class="form-control" value="<?= htmlspecialchars($supportEmail) ?>" required>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label small fw-bold">Currency & Timezone</label>
-                  <input type="text" class="form-control bg-light" value="PKR (Pakistan Standard Time - PKT)" readonly>
+                  <input type="text" class="form-control bg-light text-muted" value="PKR (Pakistan Standard Time - PKT)" readonly>
                 </div>
               </div>
             </div>
@@ -118,15 +175,15 @@ require_once __DIR__ . '/settings/auth.php';
               <div class="row g-3">
                 <div class="col-md-6">
                   <label class="form-label small fw-bold">Standard Delivery Fee (PKR)</label>
-                  <input type="number" class="form-control" value="250">
+                  <input type="number" step="0.01" name="delivery_fee_pkr" class="form-control" value="<?= htmlspecialchars($deliveryFee) ?>" min="0" required>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label small fw-bold">Free Delivery Threshold (PKR)</label>
-                  <input type="number" class="form-control" value="10000">
+                  <input type="number" step="0.01" name="free_delivery_threshold_pkr" class="form-control" value="<?= htmlspecialchars($freeThreshold) ?>" min="0" required>
                 </div>
                 <div class="col-12">
                   <label class="form-label small fw-bold">Delivery Estimate Notice</label>
-                  <input type="text" class="form-control" value="2-3 business days for major cities (Lahore, Karachi, Islamabad); 3-5 days nationwide.">
+                  <input type="text" name="delivery_estimate" class="form-control" value="<?= htmlspecialchars($deliveryEstimate) ?>">
                 </div>
               </div>
             </div>
@@ -138,16 +195,39 @@ require_once __DIR__ . '/settings/auth.php';
             <div class="admin-card-body">
               <div class="mb-3">
                 <label class="form-label small fw-bold">Exchange Period</label>
-                <input type="text" class="form-control" value="15-Day Complimentary Doorstep Exchange for sizing adjustment.">
+                <input type="text" name="exchange_policy" class="form-control" value="<?= htmlspecialchars($exchangePolicy) ?>">
               </div>
             </div>
           </div>
 
-          <button type="submit" class="btn btn-dark px-4 py-2">Save Settings</button>
+          <button type="submit" class="btn btn-dark px-4 py-2">
+            <i class="bi bi-check2-circle me-1"></i> Save Settings
+          </button>
 
         </div>
 
         <div class="col-lg-4">
+          <div class="admin-card mb-4">
+            <div class="admin-card-header"><h5 class="admin-card-title">Database Storage</h5></div>
+            <div class="admin-card-body small text-muted">
+              <div class="mb-2"><strong>Table:</strong> <code>store_settings</code></div>
+              <div class="mb-2"><strong>Active Settings Keys:</strong></div>
+              <ul class="ps-3 mb-3">
+                <li><code>brand_name</code></li>
+                <li><code>helpline_phone</code></li>
+                <li><code>support_email</code></li>
+                <li><code>delivery_fee_pkr</code></li>
+                <li><code>free_delivery_threshold_pkr</code></li>
+                <li><code>delivery_estimate</code></li>
+                <li><code>exchange_policy</code></li>
+              </ul>
+              <div class="border-top pt-2">
+                <span class="text-muted">Storage Mode:</span><br>
+                <strong class="text-dark"><?= $isKeyValue ? 'Key-Value Pairs' : 'Dedicated Columns' ?></strong>
+              </div>
+            </div>
+          </div>
+
           <div class="admin-card">
             <div class="admin-card-header"><h5 class="admin-card-title">Quick Status</h5></div>
             <div class="admin-card-body small">
@@ -156,8 +236,12 @@ require_once __DIR__ . '/settings/auth.php';
                 <strong>Cash on Delivery (Active)</strong>
               </div>
               <div class="d-flex justify-content-between mb-2">
-                <span class="text-muted">SSL Encryption:</span>
-                <strong class="text-success">Enabled</strong>
+                <span class="text-muted">Currency:</span>
+                <strong>PKR (₨)</strong>
+              </div>
+              <div class="d-flex justify-content-between mb-2">
+                <span class="text-muted">Free Shipping Above:</span>
+                <strong class="text-success">PKR <?= number_format((float)$freeThreshold) ?></strong>
               </div>
             </div>
           </div>
